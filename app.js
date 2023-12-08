@@ -8,16 +8,18 @@ const nodemailer = require('nodemailer');
 const multer = require('multer');
 const {successmsg} = require('./htmlfiles.js');
 var sqlite3 = require('sqlite3').verbose();
+const createCsvWriter = require('csv-writer').createObjectCsvWriter;
+const chokidar = require('chokidar');
 
 // Open a database handle
-var db = new sqlite3.Database('mydb.db', sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
+var db = new sqlite3.Database('mydb.db', sqlite3.OPEN_READWRITE, (err) => {
   if (err) {
     console.error(err.message);
   }
   console.log('Connected to the mydb database.');
 });
 
-let data = ['value1', 'value2'];
+/*let data = ['value1', 'value2'];
 let sql = `INSERT INTO emails (Time, Emails) VALUES (?, ?)`;
 
 db.run(`CREATE TABLE IF NOT EXISTS emails (Time TEXT, Emails TEXT)`, function(err) {
@@ -25,7 +27,9 @@ db.run(`CREATE TABLE IF NOT EXISTS emails (Time TEXT, Emails TEXT)`, function(er
     return console.error(err.message);
   }
   console.log(`Row(s) inserted: ${this.lastID}`);
-});
+});*/
+
+//sql = `CREATE TABLE IF NOT EXISTS users ( id INTEGER PRIMARY KEY AUTOINCREMENT, Time TEXT, Emails TEXT)`;
 
 // Create an Express application
 const app = express();
@@ -40,20 +44,40 @@ app.use(bodyParser.json());
 
 // Define a route to handle form submissions
 app.post('/submit', upload.single('myfile'),async (req, res) => {
+    
+  const email = req.body.email;
+  const time = new Date().toLocaleString();
   
-  let data = [req.body.time, req.body.email];
-  let sql = `INSERT INTO email  ( Time, Emails) VALUES (?, ?)`;
+  
+  let createTableSql = `CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT,Time TEXT, Emails TEXT UNIQUE)`;
 
-  db.run(sql, data, function(err) {
+  db.run(createTableSql, function(err) {
     if (err) {
       return console.error(err.message);
     }
-    console.log(`Row(s) inserted: ${this.lastID}`);
+    console.log("Users table created");
   });
+
+  let insertDataSql = `INSERT OR IGNORE INTO users (Time, Emails) VALUES (?, ?)`;
+  let data = [time, email];
+
+  db.run(insertDataSql, data, function(err) {
+    if (err) {
+      return console.error(err.message);
+    }
+    console.log(`Row(s) inserted: ${this.lastID} - ${time} - ${email}`);
+  });
+
+  /*db.close((err) => {
+    if (err) {
+      console.error(err.message);
+    } else {
+      console.log(`Close the database connection.`);
+    }
+  });*/
 
   //res.send('Data received and stored in database');
     // Access form data
-    const email = req.body.email;
     //const file = req.file;
 
     // Validate the email address
@@ -80,6 +104,37 @@ app.post('/submit', upload.single('myfile'),async (req, res) => {
         res.status(400).send('Invalid email address');
     }
 });
+
+
+function exportToCsv() {
+  let data = [];
+  let csvWriter = createCsvWriter({
+    path: 'out.csv',
+    header: [
+      {id: 'Time', title: 'TIME'},
+      {id: 'Emails', title: 'EMAILS'},
+      // add more column headers as needed
+    ]
+  });
+
+
+
+db.serialize(() => {
+  db.each(`SELECT * FROM users`, (err, row) => {
+    if (err) {
+      console.error(err.message);
+    }
+    data.push(row);
+  }, () => { // callback function when all rows have been retrieved
+    csvWriter
+      .writeRecords(data)
+      .then(() => console.log('The CSV file was written successfully'));
+  });
+});
+}
+
+// Watch the SQLite database file for changes
+chokidar.watch('./mydb.db').on('change', exportToCsv);
 
 // Start the server
 const join = require('path').join;
